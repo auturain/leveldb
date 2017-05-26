@@ -22,12 +22,7 @@ import org.iq80.leveldb.DBFactory;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.FileUtils;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.UnsupportedEncodingException;
+import java.io.*;
 
 /**
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
@@ -75,10 +70,11 @@ public class Iq80DBFactory
 
     public static final Iq80DBFactory factory = new Iq80DBFactory();
 
+
+    //1
     @Override
     public DB open(File path, Options options)
-            throws IOException
-    {
+            throws IOException {
         return new DbImpl(options, path);
     }
 

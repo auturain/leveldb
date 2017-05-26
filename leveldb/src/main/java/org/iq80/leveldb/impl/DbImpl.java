@@ -20,16 +20,7 @@ package org.iq80.leveldb.impl;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import org.iq80.leveldb.CompressionType;
-import org.iq80.leveldb.DB;
-import org.iq80.leveldb.DBComparator;
-import org.iq80.leveldb.DBException;
-import org.iq80.leveldb.Options;
-import org.iq80.leveldb.Range;
-import org.iq80.leveldb.ReadOptions;
-import org.iq80.leveldb.Snapshot;
-import org.iq80.leveldb.WriteBatch;
-import org.iq80.leveldb.WriteOptions;
+import org.iq80.leveldb.*;
 import org.iq80.leveldb.impl.Filename.FileInfo;
 import org.iq80.leveldb.impl.Filename.FileType;
 import org.iq80.leveldb.impl.MemTable.MemTableIterator;
@@ -38,38 +29,21 @@ import org.iq80.leveldb.table.BytewiseComparator;
 import org.iq80.leveldb.table.CustomUserComparator;
 import org.iq80.leveldb.table.TableBuilder;
 import org.iq80.leveldb.table.UserComparator;
-import org.iq80.leveldb.util.DbIterator;
-import org.iq80.leveldb.util.MergingIterator;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.SliceInput;
-import org.iq80.leveldb.util.SliceOutput;
-import org.iq80.leveldb.util.Slices;
-import org.iq80.leveldb.util.Snappy;
+import org.iq80.leveldb.util.*;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.nio.channels.FileChannel;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map.Entry;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
 import static com.google.common.collect.Lists.newArrayList;
-import static org.iq80.leveldb.impl.DbConstants.L0_SLOWDOWN_WRITES_TRIGGER;
-import static org.iq80.leveldb.impl.DbConstants.L0_STOP_WRITES_TRIGGER;
-import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
+import static org.iq80.leveldb.impl.DbConstants.*;
 import static org.iq80.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
 import static org.iq80.leveldb.impl.ValueType.DELETION;
 import static org.iq80.leveldb.impl.ValueType.VALUE;
@@ -80,6 +54,7 @@ import static org.iq80.leveldb.util.Slices.writeLengthPrefixedBytes;
 
 // todo make thread safe and concurrent
 @SuppressWarnings("AccessingNonPublicFieldOfAnotherObject")
+//2
 public class DbImpl
         implements DB
 {
@@ -152,22 +127,24 @@ public class DbImpl
 
         // Reserve ten files or so for other uses and give the rest to TableCache.
         int tableCacheSize = options.maxOpenFiles() - 10;
+        //表的缓存？
         tableCache = new TableCache(databaseDir, tableCacheSize, new InternalUserComparator(internalKeyComparator), options.verifyChecksums());
 
         // create the version set
 
         // create the database dir if it does not already exist
-        databaseDir.mkdirs();
+        databaseDir.mkdirs(); //创建路径
         Preconditions.checkArgument(databaseDir.exists(), "Database directory '%s' does not exist and could not be created", databaseDir);
         Preconditions.checkArgument(databaseDir.isDirectory(), "Database directory '%s' is not a directory", databaseDir);
 
+        //上锁
         mutex.lock();
         try {
             // lock the database dir
-            dbLock = new DbLock(new File(databaseDir, Filename.lockFileName()));
+            dbLock = new DbLock(new File(databaseDir, Filename.lockFileName())); //目录下建一个LOCK文件来上锁
 
             // verify the "current" file
-            File currentFile = new File(databaseDir, Filename.currentFileName());
+            File currentFile = new File(databaseDir, Filename.currentFileName()); //目录下一个CURRENT文件
             if (!currentFile.canRead()) {
                 Preconditions.checkArgument(options.createIfMissing(), "Database '%s' does not exist and the create if missing option is disabled", databaseDir);
             }
@@ -679,11 +656,11 @@ public class DbImpl
             throws DBException
     {
         checkBackgroundException();
-        mutex.lock();
+        mutex.lock(); //先上互斥锁
         try {
             long sequenceEnd;
             if (updates.size() != 0) {
-                makeRoomForWrite(false);
+                makeRoomForWrite(false); //好像并没有用啊，用来创建memtable的
 
                 // Get sequence numbers for this change set
                 long sequenceBegin = versions.getLastSequence() + 1;
@@ -693,9 +670,10 @@ public class DbImpl
                 versions.setLastSequence(sequenceEnd);
 
                 // Log write
+                //写入操作，返回写入的东西
                 Slice record = writeWriteBatch(updates, sequenceBegin);
                 try {
-                    log.addRecord(record, options.sync());
+                    log.addRecord(record, options.sync()); //写入到磁盘
                 }
                 catch (IOException e) {
                     throw Throwables.propagate(e);
@@ -808,9 +786,9 @@ public class DbImpl
 
     private void makeRoomForWrite(boolean force)
     {
-        Preconditions.checkState(mutex.isHeldByCurrentThread());
+        Preconditions.checkState(mutex.isHeldByCurrentThread()); //当前线程是否可以操作？
 
-        boolean allowDelay = !force;
+        boolean allowDelay = !force; //是否允许有延迟，（是否强制写入）
 
         while (true) {
             // todo background processing system need work
@@ -819,7 +797,7 @@ public class DbImpl
 //              s = bg_error_;
 //              break;
 //            } else
-            if (allowDelay && versions.numberOfFilesInLevel(0) > L0_SLOWDOWN_WRITES_TRIGGER) {
+            if (allowDelay && versions.numberOfFilesInLevel(0) > L0_SLOWDOWN_WRITES_TRIGGER) { //允许有延迟的情况
                 // We are getting close to hitting a hard limit on the number of
                 // L0 files.  Rather than delaying a single write by several
                 // seconds when we hit the hard limit, start delaying each
@@ -1331,7 +1309,7 @@ public class DbImpl
         final SliceOutput sliceOutput = record.output();
         sliceOutput.writeLong(sequenceBegin);
         sliceOutput.writeInt(updates.size());
-        updates.forEach(new Handler()
+        updates.forEach(new Handler() //遍历更新操作，如果value是null，那么就是delete
         {
             @Override
             public void put(Slice key, Slice value)

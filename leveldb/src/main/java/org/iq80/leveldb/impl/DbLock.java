@@ -29,6 +29,9 @@ import java.nio.channels.FileLock;
 
 import static java.lang.String.format;
 
+/**
+ * 主要对文件进行上锁操作，通过上锁文件的channel来对文件进行上锁
+ */
 public class DbLock
 {
     private final File lockFile;
@@ -36,8 +39,7 @@ public class DbLock
     private final FileLock lock;
 
     public DbLock(File lockFile)
-            throws IOException
-    {
+            throws IOException {
         Preconditions.checkNotNull(lockFile, "lockFile is null");
         this.lockFile = lockFile;
 
@@ -45,8 +47,7 @@ public class DbLock
         channel = new RandomAccessFile(lockFile, "rw").getChannel();
         try {
             lock = channel.tryLock();
-        }
-        catch (IOException e) {
+        } catch (IOException e) {
             Closeables.closeQuietly(channel);
             throw e;
         }
@@ -56,27 +57,22 @@ public class DbLock
         }
     }
 
-    public boolean isValid()
-    {
+    public boolean isValid() {
         return lock.isValid();
     }
 
-    public void release()
-    {
+    public void release() {
         try {
             lock.release();
-        }
-        catch (IOException e) {
+        } catch (IOException e) {
             Throwables.propagate(e);
-        }
-        finally {
+        } finally {
             Closeables.closeQuietly(channel);
         }
     }
 
     @Override
-    public String toString()
-    {
+    public String toString() {
         StringBuilder sb = new StringBuilder();
         sb.append("DbLock");
         sb.append("{lockFile=").append(lockFile);

@@ -18,11 +18,7 @@
 package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
-import org.iq80.leveldb.util.Closeables;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.SliceInput;
-import org.iq80.leveldb.util.SliceOutput;
-import org.iq80.leveldb.util.Slices;
+import org.iq80.leveldb.util.*;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -120,61 +116,61 @@ public class FileChannelLogWriter
         // Fragment the record int chunks as necessary and write it.  Note that if record
         // is empty, we still want to iterate once to write a single
         // zero-length chunk.
+        //分割写入的记录为指定的大小，然后不足的就填充0？
         do {
-            int bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
-            Preconditions.checkState(bytesRemainingInBlock >= 0);
+            int bytesRemainingInBlock = BLOCK_SIZE - blockOffset; //BLOCK_SIZE是固定的32768，剩下的块数，难道这个blockOffset不会报null？
+            Preconditions.checkState(bytesRemainingInBlock >= 0); //检验剩余的块数
 
             // Switch to a new block if necessary
-            if (bytesRemainingInBlock < HEADER_SIZE) {
+            if (bytesRemainingInBlock < HEADER_SIZE) { // Header is checksum (4 bytes), type (1 byte), length (2 bytes).
                 if (bytesRemainingInBlock > 0) {
                     // Fill the rest of the block with zeros
                     // todo lame... need a better way to write zeros
                     fileChannel.write(ByteBuffer.allocate(bytesRemainingInBlock));
                 }
-                blockOffset = 0;
+                blockOffset = 0; //换新的block了？
                 bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
             }
 
             // Invariant: we never leave less than HEADER_SIZE bytes available in a block
-            int bytesAvailableInBlock = bytesRemainingInBlock - HEADER_SIZE;
+            int bytesAvailableInBlock = bytesRemainingInBlock - HEADER_SIZE; //一个block的剩余空间
             Preconditions.checkState(bytesAvailableInBlock >= 0);
 
             // if there are more bytes in the record then there are available in the block,
             // fragment the record; otherwise write to the end of the record
             boolean end;
             int fragmentLength;
-            if (sliceInput.available() > bytesAvailableInBlock) {
-                end = false;
-                fragmentLength = bytesAvailableInBlock;
-            }
-            else {
-                end = true;
+            if (sliceInput.available() > bytesAvailableInBlock) { //要写入的数据大于这个block的剩余空间
+                end = false; //还没结束
+                fragmentLength = bytesAvailableInBlock; //分块的大小就是剩余空间的大小
+            } else { //如果要写入的数据小于这个block的剩余空间了，装不满
+                end = true; //证明要结束了
                 fragmentLength = sliceInput.available();
             }
 
             // determine block type
             LogChunkType type;
             if (begin && end) {
-                type = LogChunkType.FULL;
+                type = LogChunkType.FULL; //直接一条写完
             }
             else if (begin) {
-                type = LogChunkType.FIRST;
+                type = LogChunkType.FIRST; //第一次写
             }
             else if (end) {
-                type = LogChunkType.LAST;
+                type = LogChunkType.LAST;  //最后写
             }
             else {
-                type = LogChunkType.MIDDLE;
+                type = LogChunkType.MIDDLE;  //在写的过程中
             }
 
             // write the chunk
-            writeChunk(type, sliceInput.readSlice(fragmentLength));
+            writeChunk(type, sliceInput.readSlice(fragmentLength)); //那就写吧，用readSlice把写的内容按照fragmentLength分块
 
             // we are no longer on the first chunk
-            begin = false;
-        } while (sliceInput.isReadable());
+            begin = false;  //这是已经不是第一次写了
+        } while (sliceInput.isReadable()); //看slice还有没有可读的
 
-        if (force) {
+        if (force) { //是否强制数据从缓存写入到磁盘
             fileChannel.force(false);
         }
     }
@@ -186,13 +182,13 @@ public class FileChannelLogWriter
         Preconditions.checkArgument(blockOffset + HEADER_SIZE <= BLOCK_SIZE);
 
         // create header
-        Slice header = newLogRecordHeader(type, slice, slice.length());
+        Slice header = newLogRecordHeader(type, slice, slice.length()); // Header is checksum 校验，为 slice 对象计算出(4 bytes), type (1 byte), length (2 bytes).
 
         // write the header and the payload
-        header.getBytes(0, fileChannel, header.length());
+        header.getBytes(0, fileChannel, header.length()); //这就写了？
         slice.getBytes(0, fileChannel, slice.length());
 
-        blockOffset += HEADER_SIZE + slice.length();
+        blockOffset += HEADER_SIZE + slice.length(); //写了这么长
     }
 
     private Slice newLogRecordHeader(LogChunkType type, Slice slice, int length)
@@ -200,6 +196,7 @@ public class FileChannelLogWriter
         int crc = Logs.getChunkChecksum(type.getPersistentId(), slice.getRawArray(), slice.getRawOffset(), length);
 
         // Format the header
+        //按位存储
         SliceOutput header = Slices.allocate(HEADER_SIZE).output();
         header.writeInt(crc);
         header.writeByte((byte) (length & 0xff));
